@@ -1,7 +1,3 @@
-
-#!/usr/bin/env python3
-"""ULF encoder with Vulkan glyph matching, delta frames, and compact binary audio."""
-
 import argparse
 import json
 import os
@@ -17,6 +13,7 @@ import cv2
 import numpy as np
 from PIL import Image, ImageDraw, ImageFont
 from fontTools.ttLib import TTFont
+from ulf._optional import has_optional_dependencies, warn_optional
 
 
 # ------------------------------------------------------------
@@ -814,7 +811,12 @@ def write_audio(out_path, audio_data):
 # MAIN ENCODER
 # ------------------------------------------------------------
 
-def main():
+def main(argv=None):
+    """Run the encoder command line interface.
+
+    ``argv`` is primarily intended for the public :mod:`ulf` API and tests.
+    Pass ``None`` (the default) to read arguments from ``sys.argv``.
+    """
     parser = argparse.ArgumentParser(
         description=(
             "Encode video as Unicode Lossful Format "
@@ -881,7 +883,14 @@ def main():
         help="Print per-frame encoding timings.",
     )
 
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
+
+    if args.backend != "cpu" and not has_optional_dependencies(
+        "wgpu",
+        "rendercanvas",
+        "glfw",
+    ):
+        warn_optional("GPU glyph matching")
 
     # --------------------------------------------------------
     # Validate settings.

@@ -12,18 +12,21 @@ It supports audio, delta-frame compression, GPU acceleration, and MP4 export.
 
 Python 3.10+.
 
-Install the dependencies:
+Install the package (with all optional playback features):
 
 ```bash
-python -m pip install opencv-python pillow numpy fonttools wgpu rendercanvas sounddevice regex
+python -m pip install "unicode-lossful-format[all]"
 ```
 
 FFmpeg must be installed and available on your system PATH for MP4 export.
+It is an external system dependency and is not installed by pip or by any ULF
+extra. Verify it with `ffmpeg -version` before using `ulf convert` or
+`ulf.convert()`.
 
 ## Encode
 
 ```bash
-python ulf_encode.py input.mp4 output.ulf --size 80x40
+ulf-encode input.mp4 output.ulf --size 80x40
 ```
 
 ### Options
@@ -43,7 +46,7 @@ python ulf_encode.py input.mp4 output.ulf --size 80x40
 ## Play
 
 ```bash
-python ulf_play.py output.ulf
+ulf-play output.ulf
 ```
 
 ### Options
@@ -53,6 +56,30 @@ python ulf_play.py output.ulf
 - `--backend auto|vulkan|cpu`: Select playback backend.
 - `--mute`: Disable audio.
 - `--debug`: Enable diagnostic output.
+
+## Convert to MP4
+
+```bash
+ulf convert output.ulf output.mp4 --encoder auto --export-quality high
+```
+
+The legacy equivalent remains `ulf-play output.ulf --export output.mp4`.
+
+## Python API
+
+The same options are available as keyword arguments, using underscores in
+place of CLI hyphens:
+
+```python
+import ulf
+
+ulf.encode("example.mp4", "example.ulf", size="80x40", backend="auto")
+ulf.play("example.ulf", window="1280x720", mute=False)
+ulf.convert("example.ulf", "example.mp4", encoder="auto", export_quality="high")
+```
+
+`encode()` derives an `.ulf` output path when its `output` argument is omitted.
+`convert()` requires FFmpeg on your system `PATH`, just like the CLI.
 
 ## File format
 

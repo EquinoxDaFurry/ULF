@@ -1,26 +1,3 @@
-#!/usr/bin/env python3
-"""
-ULF player with:
-- Legacy and delta-frame decoding
-- Vulkan GPU playback
-- CPU playback fallback
-- Binary sine-component audio reconstruction
-- Direct MP4 export
-- Automatic hardware encoder detection:
-    NVIDIA NVENC
-    AMD AMF
-    Intel Quick Sync
-    VAAPI
-    CPU libx264 fallback
-
-Usage:
-    python ulf_play.py video.ulf
-    python ulf_play.py video.ulf --export output.mp4
-    python ulf_play.py video.ulf --export output.mp4 --encoder amf
-    python ulf_play.py video.ulf --export output.mp4 --encoder nvenc
-    python ulf_play.py video.ulf --export output.mp4 --encoder cpu
-"""
-
 import argparse
 import csv
 import json
@@ -36,6 +13,7 @@ from pathlib import Path
 
 import numpy as np
 from PIL import Image, ImageDraw, ImageFont
+from ulf._optional import has_optional_dependencies, warn_optional
 
 
 BINARY_AUDIO_MARKER = b"@AUDIO-BINARY-V1\n"
@@ -2134,7 +2112,12 @@ def play_vulkan(
 # MAIN
 # ------------------------------------------------------------
 
-def main():
+def main(argv=None):
+    """Run the player/exporter command line interface.
+
+    ``argv`` is primarily intended for the public :mod:`ulf` API and tests.
+    Pass ``None`` (the default) to read arguments from ``sys.argv``.
+    """
 
     parser = argparse.ArgumentParser(
         description=(
@@ -2208,7 +2191,19 @@ def main():
         ),
     )
 
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
+
+    if args.backend != "cpu" and not args.export and not has_optional_dependencies(
+        "wgpu",
+        "rendercanvas",
+        "glfw",
+    ):
+        warn_optional("GPU playback")
+
+    if not args.mute and not args.export and not has_optional_dependencies(
+        "sounddevice",
+    ):
+        warn_optional("live audio playback")
 
     # --------------------------------------------------------
     # Validate playback window.
