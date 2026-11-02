@@ -6,7 +6,7 @@ It supports audio, delta-frame compression, GPU acceleration, and MP4 export.
 
 ## Comparison
 
-![ULF Comparison](ULF_comparison.gif)
+<img src="ULF_comparison.gif" alt="ULF Comparison" width="600">
 
 ## Requirements
 
