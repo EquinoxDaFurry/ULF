@@ -1,3 +1,4 @@
+
 import argparse
 import json
 import os
@@ -477,22 +478,88 @@ class VulkanGlyphMatcher:
 
 
 # ------------------------------------------------------------
+# COLOUR HELPERS
+# ------------------------------------------------------------
+
+def sample_cell_colours(frame, width, height):
+    """
+    Sample one RGB colour for each output character cell.
+
+    Returns a uint8 array shaped (width * height, 3).
+    The original frame is BGR because it comes from OpenCV.
+    """
+
+    rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+
+    colour_grid = cv2.resize(
+        rgb,
+        (width, height),
+        interpolation=cv2.INTER_AREA,
+    )
+
+    return np.ascontiguousarray(
+        colour_grid.reshape(width * height, 3),
+        dtype=np.uint8,
+    )
+
+
+def encode_rgb_row(colours):
+    """Encode RGB triplets as six hexadecimal characters per cell."""
+
+    return "".join(
+        f"{int(r):02X}{int(g):02X}{int(b):02X}"
+        for r, g, b in colours
+    )
+
+
+# ------------------------------------------------------------
 # DELTA FRAME ENCODING
 # ------------------------------------------------------------
 
-def make_delta_records(previous, current, max_gap=2):
-    """Create changed runs. Small unchanged gaps are included in runs."""
+def make_delta_records(
+    previous_ids,
+    current_ids,
+    current_chars,
+    previous_colours=None,
+    current_colours=None,
+    max_gap=2,
+):
+    """
+    Create changed runs.
 
-    changed = np.flatnonzero(previous != current)
+    Glyph IDs are used only to detect changed glyphs.
+    Actual Unicode characters are written to the ULF file.
 
-    if len(changed) == 0:
+    In colour mode, a cell is changed if either its glyph
+    or its RGB colour changed.
+
+    Colour delta records are JSON lines:
+        {"start":0,"count":2,"glyphs":"AB","rgb":"FF000000FF00"}
+    """
+
+    changed = previous_ids != current_ids
+
+    colour_mode = (
+        previous_colours is not None
+        and current_colours is not None
+    )
+
+    if colour_mode:
+        changed |= np.any(
+            previous_colours != current_colours,
+            axis=1,
+        )
+
+    changed_indices = np.flatnonzero(changed)
+
+    if len(changed_indices) == 0:
         return []
 
     groups = []
-    start = int(changed[0])
+    start = int(changed_indices[0])
     end = start
 
-    for value in changed[1:]:
+    for value in changed_indices[1:]:
         value = int(value)
 
         if value - end - 1 <= max_gap:
@@ -506,19 +573,72 @@ def make_delta_records(previous, current, max_gap=2):
     records = []
 
     for start, end in groups:
-        payload = "".join(current[start:end + 1].tolist())
-        records.append(
-            f"{start}:{end - start + 1}:{payload}\n"
+        # IMPORTANT:
+        # current_chars contains the original font-derived
+        # Unicode characters. These are NOT glyph IDs.
+        glyph_payload = "".join(
+            current_chars[start:end + 1].tolist()
         )
+
+        count = end - start + 1
+
+        if colour_mode:
+            rgb_payload = encode_rgb_row(
+                current_colours[start:end + 1]
+            )
+
+            record = {
+                "start": start,
+                "count": count,
+                "glyphs": glyph_payload,
+                "rgb": rgb_payload,
+            }
+
+            records.append(
+                json.dumps(
+                    record,
+                    ensure_ascii=False,
+                    separators=(",", ":"),
+                ) + "\n"
+            )
+
+        else:
+            records.append(
+                f"{start}:{count}:{glyph_payload}\n"
+            )
 
     return records
 
 
-def write_keyframe(out, frame_number, rows):
+def write_keyframe(
+    out,
+    frame_number,
+    rows,
+    colours=None,
+    width=None,
+    height=None,
+):
+    """Write a full keyframe, optionally followed by RGB data."""
+
     out.write(f"@KEYFRAME {frame_number}\n")
 
     for row in rows:
         out.write(row + "\n")
+
+    if colours is not None:
+        if width is None or height is None:
+            raise ValueError(
+                "Width and height are required for colour keyframes."
+            )
+
+        out.write("@RGB\n")
+
+        for y in range(height):
+            row_colours = colours[
+                y * width:(y + 1) * width
+            ]
+
+            out.write(encode_rgb_row(row_colours) + "\n")
 
 
 def write_delta(out, frame_number, records):
@@ -616,10 +736,6 @@ def analyse_audio(
         uint16 component_count
 
     All values are little-endian.
-
-    Frequency is rounded to the nearest whole Hz.
-    Phase maps [0, 2*pi) to [0, 65535].
-    Amplitude is stored as IEEE-754 float16.
     """
 
     segment_samples = max(
@@ -662,11 +778,9 @@ def analyse_audio(
         spectrum = np.fft.rfft(windowed)
         magnitudes = np.abs(spectrum)
 
-        # Exclude DC.
         if len(magnitudes) > 0:
             magnitudes[0] = 0.0
 
-        # Ignore the Nyquist component.
         if len(magnitudes) > 1:
             magnitudes[-1] = 0.0
 
@@ -698,16 +812,13 @@ def analyse_audio(
                 if amplitude <= 1e-8:
                     continue
 
-                # Frequency: unsigned 16-bit integer in Hz.
                 frequency_q = max(
                     0,
                     min(nyquist, int(round(frequency))),
                 )
 
-                # Amplitude: IEEE-754 half-precision float.
                 amplitude_q = np.float16(amplitude)
 
-                # Phase: unsigned 16-bit turn around the circle.
                 phase_wrapped = phase % (2.0 * np.pi)
 
                 phase_q = int(round(
@@ -720,16 +831,13 @@ def analyse_audio(
                     phase_q,
                 ))
 
-        # A segment can never contain more than 65535 components.
         if len(components) > 65535:
             raise RuntimeError(
                 "Too many audio components in one segment."
             )
 
-        # Write segment component count.
         payload.extend(struct.pack("<H", len(components)))
 
-        # Write each compact component.
         for frequency_q, amplitude_q, phase_q in components:
             payload.extend(
                 struct.pack(
@@ -784,8 +892,6 @@ def write_audio(out_path, audio_data):
         @AUDIO-BINARY-V1\\n
         JSON metadata\\n
         binary segment payload
-
-    The binary payload ends at EOF.
     """
 
     if audio_data is None:
@@ -812,15 +918,13 @@ def write_audio(out_path, audio_data):
 # ------------------------------------------------------------
 
 def main(argv=None):
-    """Run the encoder command line interface.
+    """Run the encoder command line interface."""
 
-    ``argv`` is primarily intended for the public :mod:`ulf` API and tests.
-    Pass ``None`` (the default) to read arguments from ``sys.argv``.
-    """
     parser = argparse.ArgumentParser(
         description=(
             "Encode video as Unicode Lossful Format "
-            "with delta frames and compact binary audio."
+            "with delta frames, optional RGB colour, "
+            "and compact binary audio."
         )
     )
 
@@ -843,6 +947,14 @@ def main(argv=None):
         type=int,
         default=24,
         help="Write a full keyframe every N encoded frames.",
+    )
+
+    parser.add_argument(
+        "--colour",
+        "--color",
+        dest="colour",
+        action="store_true",
+        help="Enable colour encoding"
     )
 
     parser.add_argument(
@@ -927,6 +1039,11 @@ def main(argv=None):
 
     print("ULF encoder")
     print("Font:", font_path)
+
+    if args.colour:
+        print("Colour: RGB24 per character cell")
+    else:
+        print("Colour: DISABLED (monochrome)")
 
     if args.emojiless:
         print("Emoji filtering: ENABLED")
@@ -1056,7 +1173,7 @@ def main(argv=None):
         del audio_samples
 
     # --------------------------------------------------------
-    # ULF header.
+    # ULF header
     # --------------------------------------------------------
 
     out_path = Path(args.output)
@@ -1068,8 +1185,11 @@ def main(argv=None):
         "source": Path(args.input).name,
         "glyph_count": len(chars),
         "font": font_path,
-        "colour": False,
-        "frame_encoding": "delta-rle-v1",
+        "colour": args.colour,
+        "colour_encoding": "rgb24-v1" if args.colour else None,
+        "frame_encoding": (
+            "delta-rle-v2" if args.colour else "delta-rle-v1"
+        ),
         "keyframe_interval": args.keyframe_interval,
         "audio_encoding": (
             "sine-components-binary-v1"
@@ -1082,12 +1202,14 @@ def main(argv=None):
         header["audio"] = audio_data["metadata"]
 
     # --------------------------------------------------------
-    # Encode video frames.
+    # Encode video frames
     # --------------------------------------------------------
 
     encoded = 0
     source_index = 0
+
     previous_ids = None
+    previous_colours = None
 
     total_full_bytes = 0
     total_delta_bytes = 0
@@ -1120,6 +1242,10 @@ def main(argv=None):
 
                 frame_start = time.perf_counter()
 
+                # --------------------------------------------
+                # Convert to grayscale for glyph matching.
+                # --------------------------------------------
+
                 gray = cv2.cvtColor(
                     frame,
                     cv2.COLOR_BGR2GRAY,
@@ -1138,6 +1264,10 @@ def main(argv=None):
                     .reshape(width * height, 64)
                 )
 
+                # --------------------------------------------
+                # Match glyphs.
+                # --------------------------------------------
+
                 if matcher is not None:
                     ids = matcher.match(tile_data)
 
@@ -1150,10 +1280,30 @@ def main(argv=None):
 
                 ids = np.asarray(ids, dtype=np.uint32)
 
+                # Preserve the original mapping:
+                # glyph IDs index into the sorted font-derived
+                # character library.
                 current_flat = np.asarray(
                     chars,
                     dtype=object,
                 )[ids]
+
+                # --------------------------------------------
+                # Sample RGB colour per character cell.
+                # --------------------------------------------
+
+                current_colours = None
+
+                if args.colour:
+                    current_colours = sample_cell_colours(
+                        frame,
+                        width,
+                        height,
+                    )
+
+                # --------------------------------------------
+                # Build full glyph rows.
+                # --------------------------------------------
 
                 full_rows = [
                     "".join(
@@ -1163,6 +1313,10 @@ def main(argv=None):
                     )
                     for y in range(height)
                 ]
+
+                # --------------------------------------------
+                # Decide keyframe or delta.
+                # --------------------------------------------
 
                 force_keyframe = (
                     previous_ids is None
@@ -1174,17 +1328,32 @@ def main(argv=None):
                         out,
                         encoded,
                         full_rows,
+                        colours=current_colours,
+                        width=width if args.colour else None,
+                        height=height if args.colour else None,
                     )
 
-                    total_full_bytes += sum(
-                        len(row.encode("utf-8")) + 1
-                        for row in full_rows
+                    total_full_bytes += (
+                        len(f"@KEYFRAME {encoded}\n".encode("utf-8"))
+                        + sum(
+                            len(row.encode("utf-8")) + 1
+                            for row in full_rows
+                        )
                     )
+
+                    if args.colour:
+                        total_full_bytes += (
+                            len("@RGB\n")
+                            + height * (width * 6 + 1)
+                        )
 
                 else:
                     records = make_delta_records(
                         previous_ids,
+                        ids,
                         current_flat,
+                        previous_colours,
+                        current_colours,
                     )
 
                     delta_size = (
@@ -1207,11 +1376,20 @@ def main(argv=None):
                         )
                     )
 
+                    if args.colour:
+                        full_size += (
+                            len("@RGB\n")
+                            + height * (width * 6 + 1)
+                        )
+
                     if delta_size >= full_size * 0.85:
                         write_keyframe(
                             out,
                             encoded,
                             full_rows,
+                            colours=current_colours,
+                            width=width if args.colour else None,
+                            height=height if args.colour else None,
                         )
 
                         total_full_bytes += full_size
@@ -1225,7 +1403,15 @@ def main(argv=None):
 
                         total_delta_bytes += delta_size
 
-                previous_ids = current_flat.copy()
+                # --------------------------------------------
+                # Save previous frame data.
+                # --------------------------------------------
+
+                previous_ids = ids.copy()
+
+                if args.colour:
+                    previous_colours = current_colours.copy()
+
                 encoded += 1
 
                 if encoded % 10 == 0:
@@ -1264,7 +1450,7 @@ def main(argv=None):
         print("Binary audio section written.")
 
     # --------------------------------------------------------
-    # Final statistics.
+    # Final statistics
     # --------------------------------------------------------
 
     elapsed = time.perf_counter() - started
@@ -1280,8 +1466,13 @@ def main(argv=None):
     print(f"Encoding backend: {backend}")
     print(f"Encoding time: {elapsed:.2f} seconds")
     print(f"Output size: {output_size / (1024 * 1024):.2f} MiB")
-    print(f"Keyframe character data: {total_full_bytes:,} bytes")
+    print(f"Keyframe data: {total_full_bytes:,} bytes")
     print(f"Delta data: {total_delta_bytes:,} bytes")
+
+    if args.colour:
+        print("Colour format: RGB24 per character cell")
+    else:
+        print("Colour: monochrome")
 
     if audio_data is not None:
         print(

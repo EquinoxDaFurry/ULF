@@ -26,34 +26,23 @@ BINARY_AUDIO_MARKER = b"@AUDIO-BINARY-V1\n"
 ENCODER_OPTIONS = {
     "nvenc": {
         "codec": "h264_nvenc",
-        "arguments": [
-            "-preset", "p5",
-            "-tune", "hq",
-        ],
+        "arguments": ["-preset", "p5", "-tune", "hq"],
     },
     "amf": {
         "codec": "h264_amf",
-        "arguments": [
-            "-quality", "quality",
-        ],
+        "arguments": ["-quality", "quality"],
     },
     "qsv": {
         "codec": "h264_qsv",
-        "arguments": [
-            "-preset", "medium",
-        ],
+        "arguments": ["-preset", "medium"],
     },
     "vaapi": {
         "codec": "h264_vaapi",
-        "arguments": [
-            "-qp", "23",
-        ],
+        "arguments": ["-qp", "23"],
     },
     "cpu": {
         "codec": "libx264",
-        "arguments": [
-            "-preset", "medium",
-        ],
+        "arguments": ["-preset", "medium"],
     },
 }
 
@@ -71,20 +60,13 @@ def get_ffmpeg():
 
 
 def get_available_encoders(ffmpeg):
-    """Return the H.264 encoders exposed by this FFmpeg build."""
-
     try:
         result = subprocess.run(
-            [
-                ffmpeg,
-                "-hide_banner",
-                "-encoders",
-            ],
+            [ffmpeg, "-hide_banner", "-encoders"],
             capture_output=True,
             text=True,
             timeout=15,
         )
-
     except Exception as exc:
         print("WARNING: Could not inspect FFmpeg encoders:", exc)
         return set()
@@ -92,61 +74,33 @@ def get_available_encoders(ffmpeg):
     if result.returncode != 0:
         return set()
 
-    available = set()
-
-    for name in (
-        "h264_nvenc",
-        "h264_amf",
-        "h264_qsv",
-        "h264_vaapi",
-        "libx264",
-    ):
-
-        if name in result.stdout:
-            available.add(name)
-
-    return available
+    return {
+        name
+        for name in (
+            "h264_nvenc",
+            "h264_amf",
+            "h264_qsv",
+            "h264_vaapi",
+            "libx264",
+        )
+        if name in result.stdout
+    }
 
 
 def choose_encoder(ffmpeg, requested="auto"):
-    """
-    Select a usable H.264 encoder.
-
-    Automatic preference:
-        NVIDIA NVENC
-        AMD AMF
-        Intel QSV
-        VAAPI
-        CPU libx264
-
-    Merely appearing in FFmpeg's encoder list does not guarantee
-    that the driver or hardware is working. If initialization
-    fails, export_mp4() retries with the next available encoder.
-    """
-
     available = get_available_encoders(ffmpeg)
 
-    preferences = [
-        "nvenc",
-        "amf",
-        "qsv",
-        "vaapi",
-        "cpu",
-    ]
+    preferences = ["nvenc", "amf", "qsv", "vaapi", "cpu"]
 
     if requested != "auto":
-
         if requested not in ENCODER_OPTIONS:
-            raise ValueError(
-                f"Unknown encoder: {requested}"
-            )
+            raise ValueError(f"Unknown encoder: {requested}")
 
         codec = ENCODER_OPTIONS[requested]["codec"]
 
         if codec not in available:
             raise RuntimeError(
-                f"Requested encoder {codec} is not available "
-                "in this FFmpeg installation."
+                f"Requested encoder {codec} is not available."
             )
 
         return [requested]
@@ -159,27 +113,17 @@ def choose_encoder(ffmpeg, requested="auto"):
 
     if not selected:
         raise RuntimeError(
-            "FFmpeg does not expose any supported H.264 encoder. "
-            "Install an FFmpeg build with libx264 or hardware "
-            "encoder support."
+            "FFmpeg does not expose any supported H.264 encoder."
         )
 
     return selected
 
 
 def encoder_arguments(name, quality):
-    """Return codec-specific FFmpeg arguments."""
-
     settings = ENCODER_OPTIONS[name]
 
     if name == "cpu":
-
-        crf = {
-            "high": 18,
-            "medium": 23,
-            "low": 28,
-        }[quality]
-
+        crf = {"high": 18, "medium": 23, "low": 28}[quality]
         return [
             "-c:v", settings["codec"],
             *settings["arguments"],
@@ -188,13 +132,7 @@ def encoder_arguments(name, quality):
         ]
 
     if name == "nvenc":
-
-        cq = {
-            "high": 19,
-            "medium": 24,
-            "low": 29,
-        }[quality]
-
+        cq = {"high": 19, "medium": 24, "low": 29}[quality]
         return [
             "-c:v", settings["codec"],
             *settings["arguments"],
@@ -205,13 +143,7 @@ def encoder_arguments(name, quality):
         ]
 
     if name == "amf":
-
-        qp = {
-            "high": 19,
-            "medium": 24,
-            "low": 29,
-        }[quality]
-
+        qp = {"high": 19, "medium": 24, "low": 29}[quality]
         return [
             "-c:v", settings["codec"],
             *settings["arguments"],
@@ -221,13 +153,7 @@ def encoder_arguments(name, quality):
         ]
 
     if name == "qsv":
-
-        global_quality = {
-            "high": 18,
-            "medium": 23,
-            "low": 28,
-        }[quality]
-
+        global_quality = {"high": 18, "medium": 23, "low": 28}[quality]
         return [
             "-c:v", settings["codec"],
             *settings["arguments"],
@@ -236,13 +162,7 @@ def encoder_arguments(name, quality):
         ]
 
     if name == "vaapi":
-
-        qp = {
-            "high": 19,
-            "medium": 24,
-            "low": 29,
-        }[quality]
-
+        qp = {"high": 19, "medium": 24, "low": 29}[quality]
         return [
             "-vaapi_device", "/dev/dri/renderD128",
             "-vf", "format=nv12,hwupload",
@@ -255,12 +175,65 @@ def encoder_arguments(name, quality):
 
 
 # ------------------------------------------------------------
-# ULF FILE READER
+# COLOUR HELPERS
+# ------------------------------------------------------------
+
+def decode_rgb_row(line, width):
+    """Decode width concatenated RRGGBB hex values."""
+
+    expected_length = width * 6
+
+    if len(line) != expected_length:
+        raise ValueError(
+            f"RGB row has {len(line)} characters; "
+            f"expected {expected_length}."
+        )
+
+    try:
+        return np.frombuffer(
+            bytes.fromhex(line),
+            dtype=np.uint8,
+        ).reshape(width, 3).copy()
+
+    except ValueError as exc:
+        raise ValueError("Invalid RGB hex data.") from exc
+
+
+def decode_rgb_payload(payload, count):
+    """Decode a concatenated RGB hex payload."""
+
+    if len(payload) != count * 6:
+        raise ValueError(
+            "Delta RGB payload length does not match its cell count."
+        )
+
+    try:
+        return np.frombuffer(
+            bytes.fromhex(payload),
+            dtype=np.uint8,
+        ).reshape(count, 3).copy()
+
+    except ValueError as exc:
+        raise ValueError("Invalid delta RGB payload.") from exc
+
+
+def pack_rgb(rgb):
+    """Pack an (N, 3) RGB array into uint32 values for the GPU."""
+
+    rgb = np.asarray(rgb, dtype=np.uint32)
+
+    return (
+        rgb[:, 0]
+        | (rgb[:, 1] << 8)
+        | (rgb[:, 2] << 16)
+    ).astype(np.uint32)
+
+
+# ------------------------------------------------------------
+# BINARY AUDIO
 # ------------------------------------------------------------
 
 def decode_binary_audio(payload, metadata):
-    """Decode compact binary sine-component audio."""
-
     encoding = metadata.get("encoding")
 
     if encoding != "sine-components-binary-v1":
@@ -278,21 +251,16 @@ def decode_binary_audio(payload, metadata):
     offset = 0
     payload_length = len(payload)
 
-    print(
-        f"Decoding {segment_count:,} binary audio segments..."
-    )
+    print(f"Decoding {segment_count:,} binary audio segments...")
 
     for segment_number in range(segment_count):
-
         if offset + 2 > payload_length:
             raise ValueError(
                 f"Binary audio ended before segment {segment_number}."
             )
 
         component_count = struct.unpack_from(
-            "<H",
-            payload,
-            offset,
+            "<H", payload, offset
         )[0]
 
         offset += 2
@@ -307,11 +275,8 @@ def decode_binary_audio(payload, metadata):
         components = []
 
         for _ in range(component_count):
-
             frequency, amplitude, phase_q = struct.unpack_from(
-                "<HeH",
-                payload,
-                offset,
+                "<HeH", payload, offset
             )
 
             offset += 6
@@ -329,11 +294,7 @@ def decode_binary_audio(payload, metadata):
             "components": components,
         })
 
-        if (
-            segment_number > 0
-            and segment_number % 5000 == 0
-        ):
-
+        if segment_number > 0 and segment_number % 5000 == 0:
             print(
                 f"\rDecoded {segment_number:,} "
                 f"/ {segment_count:,} segments",
@@ -352,13 +313,22 @@ def decode_binary_audio(payload, metadata):
     return segments
 
 
+# ------------------------------------------------------------
+# ULF FILE READER
+# ------------------------------------------------------------
+
 def load_ulf(path):
     """
     Load ULF video and optional audio.
 
-    Note: This version retains decoded frames in system RAM.
-    The Vulkan playback path no longer duplicates all frame IDs
-    into one giant GPU allocation.
+    Returns:
+        header
+        frames          list of character-row lists
+        colours         uint8 array: (frames, height, width, 3)
+        width
+        height
+        fps
+        audio_data
     """
 
     raw = Path(path).read_bytes()
@@ -369,7 +339,6 @@ def load_ulf(path):
     marker_position = raw.find(BINARY_AUDIO_MARKER)
 
     if marker_position >= 0:
-
         video_bytes = raw[:marker_position]
 
         audio_section = raw[
@@ -384,13 +353,10 @@ def load_ulf(path):
             )
 
         try:
-
             binary_audio_metadata = json.loads(
                 audio_section[:metadata_end].decode("utf-8")
             )
-
         except (UnicodeDecodeError, json.JSONDecodeError) as exc:
-
             raise ValueError(
                 "Invalid binary audio metadata."
             ) from exc
@@ -402,9 +368,7 @@ def load_ulf(path):
 
     try:
         text = video_bytes.decode("utf-8")
-
     except UnicodeDecodeError as exc:
-
         raise ValueError(
             "ULF video section is not valid UTF-8."
         ) from exc
@@ -425,12 +389,63 @@ def load_ulf(path):
     if width < 1 or height < 1 or fps <= 0:
         raise ValueError("Invalid video dimensions or FPS.")
 
+    total_cells = width * height
+
     frames = []
-    previous = None
+    colour_frames = []
+
+    previous_glyphs = None
+    previous_colours = None
     audio_data = None
 
-    while True:
+    def read_glyph_rows():
+        rows = [
+            file.readline().rstrip("\r\n")
+            for _ in range(height)
+        ]
 
+        if any(len(row) != width for row in rows):
+            raise ValueError(
+                "Invalid or incomplete full frame."
+            )
+
+        return rows
+
+    def read_optional_keyframe_rgb():
+        """
+        A colour keyframe has this layout:
+
+            @KEYFRAME n
+            <glyph rows>
+            @RGB
+            <RGB hex rows>
+
+        Older keyframes have no @RGB section.
+        """
+
+        position = file.tell()
+        marker = file.readline()
+
+        if marker.rstrip("\r\n") != "@RGB":
+            file.seek(position)
+            return np.full(
+                (height, width, 3),
+                255,
+                dtype=np.uint8,
+            )
+
+        rgb = np.empty(
+            (height, width, 3),
+            dtype=np.uint8,
+        )
+
+        for y in range(height):
+            line = file.readline().rstrip("\r\n")
+            rgb[y] = decode_rgb_row(line, width)
+
+        return rgb
+
+    while True:
         marker = file.readline()
 
         if not marker:
@@ -439,49 +454,46 @@ def load_ulf(path):
         marker = marker.rstrip("\r\n")
 
         if marker.startswith("@FRAME "):
+            rows = read_glyph_rows()
 
-            rows = [
-                file.readline().rstrip("\r\n")
-                for _ in range(height)
-            ]
+            colours = np.full(
+                (height, width, 3),
+                255,
+                dtype=np.uint8,
+            )
 
-            if any(len(row) != width for row in rows):
-                raise ValueError(
-                    "Invalid or incomplete full frame."
-                )
+            previous_glyphs = list("".join(rows))
+            previous_colours = colours.reshape(
+                total_cells, 3
+            ).copy()
 
             frames.append(rows)
-            previous = list("".join(rows))
+            colour_frames.append(colours)
             continue
 
         if marker.startswith("@KEYFRAME "):
+            rows = read_glyph_rows()
+            colours = read_optional_keyframe_rgb()
 
-            rows = [
-                file.readline().rstrip("\r\n")
-                for _ in range(height)
-            ]
-
-            if any(len(row) != width for row in rows):
-                raise ValueError(
-                    "Invalid or incomplete keyframe."
-                )
+            previous_glyphs = list("".join(rows))
+            previous_colours = colours.reshape(
+                total_cells, 3
+            ).copy()
 
             frames.append(rows)
-            previous = list("".join(rows))
+            colour_frames.append(colours)
             continue
 
         if marker.startswith("@DELTA "):
-
-            if previous is None:
+            if previous_glyphs is None:
                 raise ValueError(
                     "Delta frame encountered before a keyframe."
                 )
 
-            current = previous.copy()
-            total_cells = width * height
+            current_glyphs = previous_glyphs.copy()
+            current_colours = previous_colours.copy()
 
             while True:
-
                 position = file.tell()
                 line = file.readline()
 
@@ -495,67 +507,113 @@ def load_ulf(path):
                     or line.startswith("@DELTA ")
                     or line.startswith("@FRAME ")
                     or line == "@AUDIO"
+                    or line == "@RGB"
                 ):
-
                     file.seek(position)
                     break
 
                 if not line:
                     continue
 
-                try:
+                # New colour delta format: JSON line.
+                if line.startswith("{"):
+                    try:
+                        record = json.loads(line)
+                    except json.JSONDecodeError as exc:
+                        raise ValueError(
+                            f"Invalid JSON delta record: {line[:100]!r}"
+                        ) from exc
 
-                    start_text, length_text, payload = line.split(
-                        ":", 2
+                    try:
+                        start = int(record["start"])
+                        count = int(record["count"])
+                        glyph_payload = record["glyphs"]
+                        rgb_payload = record["rgb"]
+                    except (KeyError, TypeError, ValueError) as exc:
+                        raise ValueError(
+                            "Delta record is missing required fields."
+                        ) from exc
+
+                    if start < 0 or count < 1:
+                        raise ValueError("Invalid delta run position or count.")
+
+                    end = start + count
+
+                    if end > total_cells:
+                        raise ValueError(
+                            "Delta run extends beyond frame."
+                        )
+
+                    if len(glyph_payload) != count:
+                        raise ValueError(
+                            "Delta glyph payload length is invalid."
+                        )
+
+                    rgb_values = decode_rgb_payload(
+                        rgb_payload,
+                        count,
                     )
 
-                    start = int(start_text)
-                    length = int(length_text)
+                    current_glyphs[start:end] = list(glyph_payload)
+                    current_colours[start:end] = rgb_values
 
-                except ValueError as exc:
+                else:
+                    # Legacy monochrome delta format:
+                    # start:length:glyphs
+                    try:
+                        start_text, length_text, payload = line.split(
+                            ":", 2
+                        )
 
-                    raise ValueError(
-                        f"Invalid delta record: {line!r}"
-                    ) from exc
+                        start = int(start_text)
+                        count = int(length_text)
 
-                if start < 0 or length < 1:
-                    raise ValueError(
-                        "Invalid delta run position or length."
-                    )
+                    except ValueError as exc:
+                        raise ValueError(
+                            f"Invalid delta record: {line!r}"
+                        ) from exc
 
-                end = start + length
+                    if start < 0 or count < 1:
+                        raise ValueError(
+                            "Invalid delta run position or length."
+                        )
 
-                if end > total_cells:
-                    raise ValueError(
-                        "Delta run extends beyond frame."
-                    )
+                    end = start + count
 
-                if len(payload) != length:
-                    raise ValueError(
-                        "Delta payload length does not match "
-                        "its record."
-                    )
+                    if end > total_cells:
+                        raise ValueError(
+                            "Delta run extends beyond frame."
+                        )
 
-                current[start:end] = list(payload)
+                    if len(payload) != count:
+                        raise ValueError(
+                            "Delta payload length does not match its record."
+                        )
 
-            previous = current
+                    current_glyphs[start:end] = list(payload)
+
+            previous_glyphs = current_glyphs
+            previous_colours = current_colours
 
             rows = [
                 "".join(
-                    current[y * width:(y + 1) * width]
+                    current_glyphs[y * width:(y + 1) * width]
                 )
                 for y in range(height)
             ]
 
+            colours = current_colours.reshape(
+                height, width, 3
+            ).copy()
+
             frames.append(rows)
+            colour_frames.append(colours)
             continue
 
         if marker == "@AUDIO":
-
             audio_data = []
 
             for line in file:
-
                 line = line.strip()
 
                 if not line:
@@ -563,9 +621,7 @@ def load_ulf(path):
 
                 try:
                     segment = json.loads(line)
-
                 except json.JSONDecodeError as exc:
-
                     raise ValueError(
                         f"Invalid audio segment: {line[:100]!r}"
                     ) from exc
@@ -582,7 +638,6 @@ def load_ulf(path):
         raise ValueError("No frames found.")
 
     if binary_audio_metadata is not None:
-
         if "audio" not in header:
             header["audio"] = binary_audio_metadata
 
@@ -604,6 +659,7 @@ def load_ulf(path):
     return (
         header,
         frames,
+        np.asarray(colour_frames, dtype=np.uint8),
         width,
         height,
         fps,
@@ -616,7 +672,6 @@ def load_ulf(path):
 # ------------------------------------------------------------
 
 def reconstruct_audio(header, segments):
-
     if segments is None:
         return None, None
 
@@ -655,18 +710,12 @@ def reconstruct_audio(header, segments):
     weight = np.zeros(total_samples, dtype=np.float64)
 
     window = np.hanning(segment_samples).astype(np.float64)
-
-    positions = np.arange(
-        segment_samples,
-        dtype=np.float64,
-    )
+    positions = np.arange(segment_samples, dtype=np.float64)
 
     angular_scale = 2.0 * np.pi / sample_rate
-
     total_segments = len(segments)
 
     for segment_number, segment in enumerate(segments):
-
         start = int(segment["start_sample"])
 
         if start < 0 or start >= total_samples:
@@ -683,7 +732,6 @@ def reconstruct_audio(header, segments):
         components = segment.get("components", [])
 
         if components:
-
             component_array = np.asarray(
                 components,
                 dtype=np.float64,
@@ -693,7 +741,6 @@ def reconstruct_audio(header, segments):
                 component_array.ndim == 2
                 and component_array.shape[1] == 3
             ):
-
                 frequencies = component_array[:, 0]
                 amplitudes = component_array[:, 1]
                 phases = component_array[:, 2]
@@ -709,7 +756,6 @@ def reconstruct_audio(header, segments):
                 phases = phases[valid]
 
                 if len(frequencies):
-
                     angles = (
                         frequencies[:, None] * angular_scale
                         * positions[None, :length]
@@ -720,23 +766,17 @@ def reconstruct_audio(header, segments):
                         amplitudes[:, None] * np.cos(angles),
                         axis=0,
                     )
-
                 else:
-
                     reconstructed = np.zeros(
                         length,
                         dtype=np.float64,
                     )
-
             else:
-
                 reconstructed = np.zeros(
                     length,
                     dtype=np.float64,
                 )
-
         else:
-
             reconstructed = np.zeros(
                 length,
                 dtype=np.float64,
@@ -750,11 +790,7 @@ def reconstruct_audio(header, segments):
 
         weight[start:start + length] += segment_window
 
-        if (
-            segment_number > 0
-            and segment_number % 2000 == 0
-        ):
-
+        if segment_number > 0 and segment_number % 2000 == 0:
             print(
                 f"\rReconstructed {segment_number:,} "
                 f"/ {total_segments:,} segments",
@@ -765,7 +801,6 @@ def reconstruct_audio(header, segments):
     print()
 
     valid = weight > 1e-8
-
     output[valid] /= weight[valid]
     output[~valid] = 0.0
 
@@ -786,22 +821,14 @@ def reconstruct_audio(header, segments):
 # ------------------------------------------------------------
 
 def create_audio_wav(audio, sample_rate):
-
     if audio is None:
         return None
 
     if sample_rate is None or sample_rate < 1:
         raise ValueError("Invalid audio sample rate.")
 
-    audio_int16 = np.clip(
-        audio,
-        -1.0,
-        1.0,
-    )
-
-    audio_int16 = (
-        audio_int16 * 32767.0
-    ).astype("<i2")
+    audio_int16 = np.clip(audio, -1.0, 1.0)
+    audio_int16 = (audio_int16 * 32767.0).astype("<i2")
 
     temp_audio = tempfile.NamedTemporaryFile(
         suffix=".wav",
@@ -812,17 +839,11 @@ def create_audio_wav(audio, sample_rate):
     temp_audio.close()
 
     try:
-
         with wave.open(audio_path, "wb") as wav_file:
-
             wav_file.setnchannels(1)
             wav_file.setsampwidth(2)
             wav_file.setframerate(sample_rate)
-
-            wav_file.writeframes(
-                audio_int16.tobytes()
-            )
-
+            wav_file.writeframes(audio_int16.tobytes())
     finally:
         del audio_int16
 
@@ -833,11 +854,11 @@ def create_audio_wav(audio, sample_rate):
 # MP4 EXPORT
 # ------------------------------------------------------------
 
-
 def export_mp4(
     output_path,
     frames,
     frame_ids,
+    colours,
     tiles,
     width,
     height,
@@ -848,12 +869,7 @@ def export_mp4(
     quality="high",
     encoder="auto",
 ):
-    """
-    Memory-efficient MP4 export.
-
-    Renders one grayscale frame at a time and streams it directly
-    to FFmpeg. No RGB conversion and no rendered-frame accumulation.
-    """
+    """Render RGB frames one at a time and stream them to FFmpeg."""
 
     import gc
 
@@ -889,7 +905,6 @@ def export_mp4(
     if output_w < 2 or output_h < 2:
         raise ValueError("Export dimensions are too small.")
 
-    # H.264 requires even output dimensions.
     output_w += output_w % 2
     output_h += output_h % 2
 
@@ -897,41 +912,25 @@ def export_mp4(
 
     print()
     print("=" * 60)
-    print("ULF MEMORY-EFFICIENT MP4 EXPORT")
+    print("ULF RGB MP4 EXPORT")
     print("=" * 60)
 
     print("Frames:", f"{frame_count:,}")
     print("FPS:", fps)
-    print("Duration:", f"{duration:.2f} seconds")
     print("Native size:", f"{native_w}x{native_h}")
     print("Output size:", f"{output_w}x{output_h}")
-    print("Input pixel format: GRAY")
+    print("Input pixel format: RGB24")
     print("Quality:", quality)
     print("Requested encoder:", encoder)
-
-    # --------------------------------------------------------
-    # Prepare audio.
-    # --------------------------------------------------------
 
     audio_path = None
 
     if audio is not None:
         print()
         print("Preparing audio WAV...")
+        audio_path = create_audio_wav(audio, sample_rate)
 
-        audio_path = create_audio_wav(
-            audio,
-            sample_rate,
-        )
-
-    # --------------------------------------------------------
-    # Detect encoders.
-    # --------------------------------------------------------
-
-    encoder_candidates = choose_encoder(
-        ffmpeg,
-        encoder,
-    )
+    encoder_candidates = choose_encoder(ffmpeg, encoder)
 
     print()
     print("Encoder candidates:")
@@ -942,35 +941,22 @@ def export_mp4(
             f"{ENCODER_OPTIONS[name]['codec']}"
         )
 
-    # --------------------------------------------------------
-    # FFmpeg input.
-    #
-    # IMPORTANT:
-    # The input is grayscale, not RGB24.
-    # This avoids allocating a three-channel image in Python.
-    # --------------------------------------------------------
-
     base_command = [
         ffmpeg,
         "-hide_banner",
         "-loglevel", "error",
         "-y",
-
         "-f", "rawvideo",
-        "-pixel_format", "gray",
+        "-pixel_format", "rgb24",
         "-video_size", f"{output_w}x{output_h}",
         "-framerate", str(fps),
         "-i", "pipe:0",
     ]
 
     if audio_path is not None:
-        base_command.extend([
-            "-i", audio_path,
-        ])
+        base_command.extend(["-i", audio_path])
 
-    base_command.extend([
-        "-map", "0:v:0",
-    ])
+    base_command.extend(["-map", "0:v:0"])
 
     if audio_path is not None:
         base_command.extend([
@@ -982,17 +968,11 @@ def export_mp4(
     else:
         base_command.append("-an")
 
-    # --------------------------------------------------------
-    # Try encoders.
-    # --------------------------------------------------------
-
     selected_encoder = None
     last_error = ""
 
     try:
-
         for encoder_name in encoder_candidates:
-
             print()
             print(
                 "Trying:",
@@ -1002,10 +982,7 @@ def export_mp4(
             command = list(base_command)
 
             command.extend(
-                encoder_arguments(
-                    encoder_name,
-                    quality,
-                )
+                encoder_arguments(encoder_name, quality)
             )
 
             command.extend([
@@ -1015,7 +992,6 @@ def export_mp4(
             ])
 
             with tempfile.TemporaryFile() as error_log:
-
                 process = subprocess.Popen(
                     command,
                     stdin=subprocess.PIPE,
@@ -1025,82 +1001,85 @@ def export_mp4(
                 )
 
                 try:
-
                     for frame_index in range(frame_count):
+                        selected = tiles[frame_ids[frame_index]]
 
-                        # ------------------------------------------------
-                        # Get the glyphs for ONE frame.
-                        # ------------------------------------------------
-
-                        selected = tiles[
-                            frame_ids[frame_index]
-                        ]
-
-                        # Shape before transpose:
+                        # Shape:
                         # (height, width, glyph_h, glyph_w)
-                        #
-                        # Shape after transpose:
-                        # (height, glyph_h, width, glyph_w)
-                        #
-                        # Final shape:
-                        # (native_h, native_w)
-
-                        image_data = selected.transpose(
+                        mask = selected.transpose(
                             0, 2, 1, 3
                         ).reshape(
                             native_h,
                             native_w,
                         )
 
-                        # ------------------------------------------------
-                        # Resize only if requested.
-                        # Still grayscale.
-                        # ------------------------------------------------
+                        cell_colours = colours[frame_index]
+
+                        pixel_colours = np.repeat(
+                            np.repeat(
+                                cell_colours,
+                                glyph_h,
+                                axis=0,
+                            ),
+                            glyph_w,
+                            axis=1,
+                        )
+
+                        # Apply the cell colour to the glyph mask.
+                        rgb_image = (
+                            pixel_colours.astype(np.float32)
+                            * (mask[:, :, None].astype(np.float32) / 255.0)
+                        ).astype(np.uint8)
+
+                        # Add a very dark background behind glyphs.
+                        background = np.full_like(
+                            rgb_image,
+                            4,
+                            dtype=np.uint8,
+                        )
+
+                        alpha = mask[:, :, None].astype(np.float32) / 255.0
+
+                        rgb_image = (
+                            rgb_image * alpha
+                            + background * (1.0 - alpha)
+                        ).astype(np.uint8)
 
                         if (
                             output_w != native_w
                             or output_h != native_h
                         ):
-
-                            image = Image.fromarray(image_data)
+                            image = Image.fromarray(
+                                rgb_image,
+                                mode="RGB",
+                            )
 
                             resized = image.resize(
                                 (output_w, output_h),
                                 Image.Resampling.NEAREST,
                             )
 
-                            image.close()
-
                             frame_bytes = resized.tobytes()
 
                             resized.close()
-
-                            del resized
-                            del image
-
+                            image.close()
                         else:
-
-                            frame_bytes = image_data.tobytes()
-
-                        # ------------------------------------------------
-                        # Send this frame directly to FFmpeg.
-                        # ------------------------------------------------
+                            frame_bytes = rgb_image.tobytes()
 
                         process.stdin.write(frame_bytes)
 
-                        # Release temporary allocations immediately.
                         del frame_bytes
-                        del image_data
+                        del rgb_image
+                        del pixel_colours
+                        del mask
                         del selected
 
                         if (
                             frame_index % max(1, int(fps)) == 0
                             or frame_index == frame_count - 1
                         ):
-
                             progress = (
-                                (frame_index + 1)
-                                / frame_count
+                                (frame_index + 1) / frame_count
                             ) * 100.0
 
                             print(
@@ -1112,18 +1091,15 @@ def export_mp4(
                                 flush=True,
                             )
 
-                        # Periodically release Python garbage.
                         if frame_index > 0 and frame_index % 500 == 0:
                             gc.collect()
 
                     print()
 
                     process.stdin.close()
-
                     return_code = process.wait()
 
-                except (BrokenPipeError, OSError, Exception):
-
+                except Exception:
                     if (
                         process.stdin is not None
                         and not process.stdin.closed
@@ -1139,7 +1115,6 @@ def export_mp4(
                     process.wait()
 
                     error_log.seek(0)
-
                     last_error = error_log.read().decode(
                         "utf-8",
                         errors="replace",
@@ -1151,10 +1126,7 @@ def export_mp4(
                     )
                     print(last_error[-3000:])
 
-                    try:
-                        output_path.unlink(missing_ok=True)
-                    except OSError:
-                        pass
+                    output_path.unlink(missing_ok=True)
 
                     if encoder != "auto":
                         raise RuntimeError(
@@ -1170,7 +1142,6 @@ def export_mp4(
                     break
 
                 error_log.seek(0)
-
                 last_error = error_log.read().decode(
                     "utf-8",
                     errors="replace",
@@ -1182,10 +1153,7 @@ def export_mp4(
                 )
                 print(last_error[-3000:])
 
-                try:
-                    output_path.unlink(missing_ok=True)
-                except OSError:
-                    pass
+                output_path.unlink(missing_ok=True)
 
                 if encoder != "auto":
                     raise RuntimeError(
@@ -1197,12 +1165,10 @@ def export_mp4(
 
         if selected_encoder is None:
             raise RuntimeError(
-                "All available encoders failed.\n"
-                + last_error
+                "All available encoders failed.\n" + last_error
             )
 
     finally:
-
         if audio_path is not None:
             try:
                 os.remove(audio_path)
@@ -1237,22 +1203,18 @@ def export_mp4(
     print()
 
 
-
 # ------------------------------------------------------------
 # AUDIO PLAYBACK
 # ------------------------------------------------------------
 
 def start_audio(audio, sample_rate, muted=False):
-
     if audio is None or muted:
-
         if muted:
             print("Audio playback: MUTED")
 
         return time.perf_counter()
 
     try:
-
         import sounddevice as sd
 
         sd.play(
@@ -1265,7 +1227,6 @@ def start_audio(audio, sample_rate, muted=False):
         print("Audio playback: ENABLED")
 
     except Exception as exc:
-
         print()
         print("WARNING: Audio playback could not start.")
         print("Reason:", exc)
@@ -1280,7 +1241,6 @@ def start_audio(audio, sample_rate, muted=False):
 # ------------------------------------------------------------
 
 def find_font(explicit=None, recorded=None):
-
     candidates = []
 
     if explicit:
@@ -1300,7 +1260,6 @@ def find_font(explicit=None, recorded=None):
         "arial.ttf",
         "consola.ttf",
     ):
-
         candidates.append(windows_fonts / name)
 
     candidates.extend([
@@ -1310,23 +1269,12 @@ def find_font(explicit=None, recorded=None):
     ])
 
     for candidate in candidates:
-
         try:
-
             if candidate.is_file():
-
-                ImageFont.truetype(
-                    str(candidate),
-                    20,
-                )
-
+                ImageFont.truetype(str(candidate), 20)
                 return str(candidate.resolve())
 
-            ImageFont.truetype(
-                str(candidate),
-                20,
-            )
-
+            ImageFont.truetype(str(candidate), 20)
             return str(candidate)
 
         except OSError:
@@ -1340,7 +1288,6 @@ def find_font(explicit=None, recorded=None):
 # ------------------------------------------------------------
 
 def build_atlas(frames, font_path, cell_w=16, cell_h=24):
-
     print("Finding unique characters...")
 
     characters = sorted({
@@ -1354,14 +1301,8 @@ def build_atlas(frames, font_path, cell_w=16, cell_h=24):
         raise ValueError("No characters found.")
 
     if font_path:
-
-        font = ImageFont.truetype(
-            font_path,
-            20,
-        )
-
+        font = ImageFont.truetype(font_path, 20)
     else:
-
         font = ImageFont.load_default()
 
     glyph_ids = {
@@ -1371,10 +1312,7 @@ def build_atlas(frames, font_path, cell_w=16, cell_h=24):
 
     atlas_cols = min(
         256,
-        max(
-            1,
-            int(np.ceil(np.sqrt(len(characters)))),
-        ),
+        max(1, int(np.ceil(np.sqrt(len(characters))))),
     )
 
     atlas_rows = int(
@@ -1383,17 +1321,13 @@ def build_atlas(frames, font_path, cell_w=16, cell_h=24):
 
     atlas = Image.new(
         "RGBA",
-        (
-            atlas_cols * cell_w,
-            atlas_rows * cell_h,
-        ),
+        (atlas_cols * cell_w, atlas_rows * cell_h),
         (0, 0, 0, 255),
     )
 
     tiles = []
 
     for index, char in enumerate(characters):
-
         tile = Image.new(
             "L",
             (cell_w, cell_h),
@@ -1403,7 +1337,6 @@ def build_atlas(frames, font_path, cell_w=16, cell_h=24):
         draw = ImageDraw.Draw(tile)
 
         try:
-
             draw.text(
                 (cell_w // 2, cell_h // 2),
                 char,
@@ -1411,7 +1344,6 @@ def build_atlas(frames, font_path, cell_w=16, cell_h=24):
                 fill=255,
                 anchor="mm",
             )
-
         except (ValueError, OSError):
             pass
 
@@ -1424,24 +1356,14 @@ def build_atlas(frames, font_path, cell_w=16, cell_h=24):
                 tile,
                 tile,
                 tile,
-                Image.new(
-                    "L",
-                    tile.size,
-                    255,
-                ),
+                Image.new("L", tile.size, 255),
             ),
         )
 
-        atlas.paste(
-            rgba,
-            (x, y),
-        )
+        atlas.paste(rgba, (x, y))
 
         tiles.append(
-            np.asarray(
-                tile,
-                dtype=np.uint8,
-            )
+            np.asarray(tile, dtype=np.uint8)
         )
 
     print("Converting frames to glyph IDs...")
@@ -1449,14 +1371,12 @@ def build_atlas(frames, font_path, cell_w=16, cell_h=24):
     frame_ids = []
 
     for frame_number, frame in enumerate(frames):
-
         ids = np.empty(
             (len(frame), len(frame[0])),
             dtype=np.uint32,
         )
 
         for y, row in enumerate(frame):
-
             ids[y] = [
                 glyph_ids[char]
                 for char in row
@@ -1464,11 +1384,7 @@ def build_atlas(frames, font_path, cell_w=16, cell_h=24):
 
         frame_ids.append(ids)
 
-        if (
-            frame_number > 0
-            and frame_number % 500 == 0
-        ):
-
+        if frame_number > 0 and frame_number % 500 == 0:
             print(
                 f"\rConverted {frame_number:,} "
                 f"/ {len(frames):,} frames",
@@ -1490,12 +1406,63 @@ def build_atlas(frames, font_path, cell_w=16, cell_h=24):
 
 
 # ------------------------------------------------------------
-# CPU FALLBACK
+# CPU RENDERING
 # ------------------------------------------------------------
+
+def render_rgb_frame(
+    frame_ids,
+    colours,
+    tiles,
+    frame_index,
+    width,
+    height,
+):
+    """Render one frame into an RGB image."""
+
+    selected = tiles[frame_ids[frame_index]]
+
+    glyph_h = selected.shape[1]
+    glyph_w = selected.shape[2]
+
+    mask = selected.transpose(
+        0, 2, 1, 3
+    ).reshape(
+        height * glyph_h,
+        width * glyph_w,
+    )
+
+    cell_colours = colours[frame_index]
+
+    pixel_colours = np.repeat(
+        np.repeat(
+            cell_colours,
+            glyph_h,
+            axis=0,
+        ),
+        glyph_w,
+        axis=1,
+    )
+
+    alpha = mask[:, :, None].astype(np.float32) / 255.0
+
+    background = np.full(
+        pixel_colours.shape,
+        4,
+        dtype=np.uint8,
+    )
+
+    result = (
+        pixel_colours.astype(np.float32) * alpha
+        + background.astype(np.float32) * (1.0 - alpha)
+    ).astype(np.uint8)
+
+    return result
+
 
 def play_cpu(
     frames,
     frame_ids,
+    colours,
     tiles,
     width,
     height,
@@ -1506,7 +1473,6 @@ def play_cpu(
     sample_rate=None,
     muted=False,
 ):
-
     import tkinter as tk
     from PIL import ImageTk
 
@@ -1541,36 +1507,34 @@ def play_cpu(
     )
 
     def draw_frame():
-
         elapsed = time.perf_counter() - playback_start
+        index = int(elapsed * fps) % len(frame_ids)
 
-        index = int(elapsed * fps) % len(frames)
-
-        selected = tiles[frame_ids[index]]
-
-        image_data = selected.transpose(
-            0, 2, 1, 3
-        )
-
-        image_data = image_data.reshape(
-            height * selected.shape[2],
-            width * selected.shape[3],
+        image_data = render_rgb_frame(
+            frame_ids,
+            colours,
+            tiles,
+            index,
+            width,
+            height,
         )
 
         image = Image.fromarray(
             image_data,
-            mode="L",
+            mode="RGB",
         )
 
         image = image.resize(
             (window_w, window_h),
             Image.Resampling.NEAREST,
-        ).convert("RGB")
+        )
 
         photo = ImageTk.PhotoImage(image)
 
         label.configure(image=photo)
         label.image = photo
+
+        image.close()
 
         root.after(
             max(1, int(delay * 1000)),
@@ -1578,21 +1542,15 @@ def play_cpu(
         )
 
     def close():
-
         try:
-
             import sounddevice as sd
             sd.stop()
-
         except Exception:
             pass
 
         root.destroy()
 
-    root.protocol(
-        "WM_DELETE_WINDOW",
-        close,
-    )
+    root.protocol("WM_DELETE_WINDOW", close)
 
     draw_frame()
     root.mainloop()
@@ -1622,6 +1580,9 @@ var<storage, read> glyph_ids: array<u32>;
 
 @group(0) @binding(2)
 var glyph_atlas: texture_2d<f32>;
+
+@group(0) @binding(3)
+var<storage, read> cell_colours: array<u32>;
 
 struct VertexOutput {
     @builtin(position) position: vec4<f32>,
@@ -1672,9 +1633,10 @@ fn fs_main(
         settings.grid_h - 1u
     );
 
-    let glyph_id = glyph_ids[
-        cell_y * settings.grid_w + cell_x
-    ];
+    let cell_index =
+        cell_y * settings.grid_w + cell_x;
+
+    let glyph_id = glyph_ids[cell_index];
 
     let local_x = min(
         u32(
@@ -1709,9 +1671,27 @@ fn fs_main(
         0
     ).r;
 
+    let packed = cell_colours[cell_index];
+
+    let red = f32(packed & 255u) / 255.0;
+    let green = f32((packed >> 8u) & 255u) / 255.0;
+    let blue = f32((packed >> 16u) & 255u) / 255.0;
+
+    let foreground = vec3<f32>(
+        red,
+        green,
+        blue
+    );
+
+    let background = vec3<f32>(
+        0.015,
+        0.015,
+        0.015
+    );
+
     let colour = mix(
-        vec3<f32>(0.015, 0.015, 0.015),
-        vec3<f32>(0.94, 0.94, 0.94),
+        background,
+        foreground,
         mask
     );
 
@@ -1727,6 +1707,7 @@ fn fs_main(
 def play_vulkan(
     frames,
     frame_ids,
+    colours,
     atlas,
     width,
     height,
@@ -1741,7 +1722,6 @@ def play_vulkan(
     sample_rate=None,
     muted=False,
 ):
-
     os.environ["WGPU_BACKEND_TYPE"] = "Vulkan"
 
     import wgpu
@@ -1766,7 +1746,6 @@ def play_vulkan(
     print("Vulkan adapter:", adapter.info)
 
     device = adapter.request_device_sync()
-
     context = canvas.get_wgpu_context()
 
     render_format = context.get_preferred_format(
@@ -1791,17 +1770,13 @@ def play_vulkan(
         fragment={
             "module": shader,
             "entry_point": "fs_main",
-            "targets": [
-                {"format": render_format}
-            ],
+            "targets": [{"format": render_format}],
         },
-        primitive={
-            "topology": "triangle-list",
-        },
+        primitive={"topology": "triangle-list"},
     )
 
     # --------------------------------------------------------
-    # Upload glyph atlas.
+    # Glyph atlas.
     # --------------------------------------------------------
 
     atlas_data = np.asarray(
@@ -1832,27 +1807,36 @@ def play_vulkan(
     )
 
     # --------------------------------------------------------
-    # Allocate one frame-sized GPU buffer.
+    # Current-frame GPU buffers.
     # --------------------------------------------------------
 
     cells_per_frame = width * height
-    video_bytes = cells_per_frame * 4
+    buffer_bytes = cells_per_frame * 4
 
-    print(
-        "GPU frame buffer:",
-        f"{video_bytes / (1024 * 1024):.2f} MiB",
-    )
-
-    video_buffer = device.create_buffer(
-        size=max(4, video_bytes),
+    glyph_buffer = device.create_buffer(
+        size=max(4, buffer_bytes),
         usage=(
             wgpu.BufferUsage.STORAGE
             | wgpu.BufferUsage.COPY_DST
         ),
     )
 
-    print("Video upload mode: one frame at a time.")
-    print("Full-video VRAM preload: disabled.")
+    colour_buffer = device.create_buffer(
+        size=max(4, buffer_bytes),
+        usage=(
+            wgpu.BufferUsage.STORAGE
+            | wgpu.BufferUsage.COPY_DST
+        ),
+    )
+
+    print(
+        "GPU glyph buffer:",
+        f"{buffer_bytes / (1024 * 1024):.2f} MiB",
+    )
+    print(
+        "GPU colour buffer:",
+        f"{buffer_bytes / (1024 * 1024):.2f} MiB",
+    )
 
     # --------------------------------------------------------
     # Uniform buffer.
@@ -1889,19 +1873,19 @@ def play_vulkan(
         entries=[
             {
                 "binding": 0,
-                "resource": {
-                    "buffer": uniform_buffer
-                },
+                "resource": {"buffer": uniform_buffer},
             },
             {
                 "binding": 1,
-                "resource": {
-                    "buffer": video_buffer
-                },
+                "resource": {"buffer": glyph_buffer},
             },
             {
                 "binding": 2,
                 "resource": atlas_texture.create_view(),
+            },
+            {
+                "binding": 3,
+                "resource": {"buffer": colour_buffer},
             },
         ],
     )
@@ -1916,17 +1900,15 @@ def play_vulkan(
         muted,
     )
 
-    frame_count = len(frames)
+    frame_count = len(frame_ids)
     previous_frame = -1
 
     timing_records = []
     previous_callback_time = None
     next_debug_report = 1.0
-
     uploaded_frame = -1
 
     def upload_frame(frame_index):
-
         nonlocal uploaded_frame
 
         if uploaded_frame == frame_index:
@@ -1937,33 +1919,37 @@ def play_vulkan(
             dtype=np.uint32,
         )
 
+        current_colours = pack_rgb(
+            colours[frame_index].reshape(-1, 3)
+        )
+
         device.queue.write_buffer(
-            video_buffer,
+            glyph_buffer,
             0,
             current_ids,
+        )
+
+        device.queue.write_buffer(
+            colour_buffer,
+            0,
+            current_colours,
         )
 
         uploaded_frame = frame_index
 
     def draw_frame():
-
         nonlocal previous_frame
         nonlocal previous_callback_time
         nonlocal next_debug_report
 
         callback_start = time.perf_counter()
-
         elapsed = callback_start - playback_start
 
-        current_frame = (
-            int(elapsed * fps) % frame_count
-        )
+        current_frame = int(elapsed * fps) % frame_count
 
         if previous_callback_time is None:
             callback_interval_ms = 0.0
-
         else:
-
             callback_interval_ms = (
                 callback_start - previous_callback_time
             ) * 1000.0
@@ -1976,14 +1962,12 @@ def play_vulkan(
         )
 
         if current_frame != previous_frame:
-
             upload_frame(current_frame)
             previous_frame = current_frame
 
         submit_start = time.perf_counter()
 
         try:
-
             current_texture = context.get_current_texture()
             view = current_texture.create_view()
 
@@ -2011,9 +1995,7 @@ def play_vulkan(
             render_pass.draw(3)
             render_pass.end()
 
-            device.queue.submit([
-                encoder.finish()
-            ])
+            device.queue.submit([encoder.finish()])
 
         except wgpu.DrawCancelled:
             return
@@ -2027,7 +2009,6 @@ def play_vulkan(
         ) * 1000.0
 
         if debug:
-
             timing_records.append((
                 elapsed,
                 current_frame,
@@ -2038,7 +2019,6 @@ def play_vulkan(
             ))
 
             if elapsed >= next_debug_report:
-
                 print(
                     f"[DEBUG] "
                     f"Video: {elapsed:7.2f}s | "
@@ -2056,7 +2036,7 @@ def play_vulkan(
     print()
     print("ULF player initialized.")
     print("Playback backend: Vulkan")
-    print("GPU storage: atlas + current frame")
+    print("GPU storage: atlas + glyph buffer + colour buffer")
     print("Per-frame uploads: enabled")
     print("Debug mode:", "ON" if debug else "OFF")
     print()
@@ -2065,28 +2045,22 @@ def play_vulkan(
         print("Timing data will be saved to ulf_timing.csv")
 
     try:
-
         loop.run()
 
     finally:
-
         try:
-
             import sounddevice as sd
             sd.stop()
-
         except Exception:
             pass
 
         if debug:
-
             with open(
                 "ulf_timing.csv",
                 "w",
                 newline="",
                 encoding="utf-8",
             ) as file:
-
                 writer = csv.writer(file)
 
                 writer.writerow([
@@ -2113,16 +2087,10 @@ def play_vulkan(
 # ------------------------------------------------------------
 
 def main(argv=None):
-    """Run the player/exporter command line interface.
-
-    ``argv`` is primarily intended for the public :mod:`ulf` API and tests.
-    Pass ``None`` (the default) to read arguments from ``sys.argv``.
-    """
-
     parser = argparse.ArgumentParser(
         description=(
-            "ULF player with delta decoding, Vulkan playback, "
-            "binary audio, and hardware-accelerated MP4 encoding."
+            "ULF player with RGB colour, delta decoding, Vulkan "
+            "playback, binary audio, and MP4 export."
         )
     )
 
@@ -2133,9 +2101,7 @@ def main(argv=None):
         default="1000x700",
     )
 
-    parser.add_argument(
-        "--font",
-    )
+    parser.add_argument("--font")
 
     parser.add_argument(
         "--backend",
@@ -2185,32 +2151,34 @@ def main(argv=None):
             "cpu",
         ),
         default="auto",
-        help=(
-            "MP4 encoder. Auto detects NVIDIA, AMD, Intel, "
-            "VAAPI, or CPU encoding."
-        ),
+        help="Select the FFmpeg video encoder.",
     )
 
     args = parser.parse_args(argv)
 
-    if args.backend != "cpu" and not args.export and not has_optional_dependencies(
-        "wgpu",
-        "rendercanvas",
-        "glfw",
+    if (
+        args.backend != "cpu"
+        and not args.export
+        and not has_optional_dependencies(
+            "wgpu",
+            "rendercanvas",
+            "glfw",
+        )
     ):
         warn_optional("GPU playback")
 
-    if not args.mute and not args.export and not has_optional_dependencies(
-        "sounddevice",
+    if (
+        not args.mute
+        and not args.export
+        and not has_optional_dependencies("sounddevice")
     ):
         warn_optional("live audio playback")
 
     # --------------------------------------------------------
-    # Validate playback window.
+    # Window dimensions.
     # --------------------------------------------------------
 
     try:
-
         window_w, window_h = map(
             int,
             args.window.lower().split("x"),
@@ -2220,21 +2188,16 @@ def main(argv=None):
             raise ValueError
 
     except ValueError:
-
-        parser.error(
-            "--window must look like 1000x700"
-        )
+        parser.error("--window must look like 1000x700")
 
     # --------------------------------------------------------
-    # Validate export resolution.
+    # Export dimensions.
     # --------------------------------------------------------
 
     export_size = None
 
     if args.export_size:
-
         try:
-
             export_w, export_h = map(
                 int,
                 args.export_size.lower().split("x"),
@@ -2243,13 +2206,9 @@ def main(argv=None):
             if export_w < 2 or export_h < 2:
                 raise ValueError
 
-            export_size = (
-                export_w,
-                export_h,
-            )
+            export_size = (export_w, export_h)
 
         except ValueError:
-
             parser.error(
                 "--export-size must look like 1920x1080"
             )
@@ -2264,6 +2223,7 @@ def main(argv=None):
     (
         header,
         frames,
+        colours,
         width,
         height,
         fps,
@@ -2287,6 +2247,14 @@ def main(argv=None):
         ),
     )
 
+    print(
+        "Colour encoding:",
+        header.get(
+            "colour_encoding",
+            "legacy monochrome / default white",
+        ),
+    )
+
     # --------------------------------------------------------
     # Audio reconstruction.
     # --------------------------------------------------------
@@ -2295,7 +2263,6 @@ def main(argv=None):
     sample_rate = None
 
     if audio_segments is not None:
-
         print(
             f"Audio segments found: "
             f"{len(audio_segments):,}"
@@ -2309,16 +2276,12 @@ def main(argv=None):
         )
 
         if args.mute and not args.export:
-
             print("Audio reconstruction skipped (--mute).")
-
         else:
-
             audio, sample_rate = reconstruct_audio(
                 header,
                 audio_segments,
             )
-
     else:
         print("No audio track found.")
 
@@ -2336,12 +2299,11 @@ def main(argv=None):
 
     if font_path:
         print("Font:", font_path)
-
     else:
         print("WARNING: Using default font.")
 
     # --------------------------------------------------------
-    # Atlas.
+    # Glyph atlas.
     # --------------------------------------------------------
 
     print("Building glyph atlas...")
@@ -2362,35 +2324,30 @@ def main(argv=None):
     print(f"Unique glyphs: {len(characters):,}")
 
     # --------------------------------------------------------
-    # Release original decoded text frames.
+    # Release decoded text frames.
     # --------------------------------------------------------
 
     frame_count = len(frames)
 
     del frames
-    frames = range(frame_count)
 
     import gc
     gc.collect()
 
     # --------------------------------------------------------
-    # Export.
+    # MP4 export.
     # --------------------------------------------------------
 
     if args.export:
-
-        # The Vulkan atlas is not needed for MP4 export.
         del atlas
         del characters
-
         gc.collect()
-
-    if args.export:
 
         export_mp4(
             output_path=args.export,
-            frames=frames,
+            frames=range(frame_count),
             frame_ids=frame_ids,
+            colours=colours,
             tiles=tiles,
             width=width,
             height=height,
@@ -2405,14 +2362,14 @@ def main(argv=None):
         return
 
     # --------------------------------------------------------
-    # CPU-only playback.
+    # CPU playback.
     # --------------------------------------------------------
 
     if args.backend == "cpu":
-
         play_cpu(
-            frames,
+            range(frame_count),
             frame_ids,
+            colours,
             tiles,
             width,
             height,
@@ -2431,10 +2388,10 @@ def main(argv=None):
     # --------------------------------------------------------
 
     try:
-
         play_vulkan(
-            frames,
+            range(frame_count),
             frame_ids,
+            colours,
             atlas,
             width,
             height,
@@ -2451,12 +2408,9 @@ def main(argv=None):
         )
 
     except Exception as exc:
-
         if args.backend == "vulkan":
-
             print("Vulkan playback failed:")
             print(exc)
-
             raise
 
         print()
@@ -2466,8 +2420,9 @@ def main(argv=None):
         print()
 
         play_cpu(
-            frames,
+            range(frame_count),
             frame_ids,
+            colours,
             tiles,
             width,
             height,

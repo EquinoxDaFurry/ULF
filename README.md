@@ -42,7 +42,8 @@ ulf-encode input.mp4 output.ulf --size 80x40
 - `--emojiless`: Exclude emoji characters.
 - `--hackerman`: Use printable keyboard ASCII characters only.
 - `--debug`: Enable diagnostic output.
-
+- `--color`: Enables colored video
+- `--colour`: British Alias for --color
 ## Play
 
 ```bash

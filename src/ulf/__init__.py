@@ -10,7 +10,7 @@ from __future__ import annotations
 from os import PathLike
 from typing import Literal
 
-__version__ = "0.1.0"
+__version__ = "2.0.0"
 
 Pathish = str | PathLike[str]
 Backend = Literal["auto", "vulkan", "cpu"]
