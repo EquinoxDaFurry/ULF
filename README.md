@@ -61,10 +61,20 @@ ulf-play output.ulf
 ## Convert to MP4
 
 ```bash
-ulf convert output.ulf output.mp4 --encoder auto --export-quality high
+ulf convert output.ulf --export output.mp4 --encoder auto --export-quality high
 ```
 
-The legacy equivalent remains `ulf-play output.ulf --export output.mp4`.
+### Options
+
+- `--window WIDTHxHEIGHT`: Set the playback window size.
+- `--font PATH`: Select the font used for rendering.
+- `--backend auto|vulkan|cpu`: Select the playback backend.
+- `--debug`: Record playback timing information.
+- `--mute`: Disable audio playback.
+- `--export OUTPUT.mp4`: Export the decoded ULF video to MP4.
+- `--export-size WIDTHxHEIGHT`: Set the MP4 output resolution.
+- `--export-quality high|medium|low`: Set the export quality preset.
+- `--encoder auto|nvenc|amf|qsv|vaapi|cpu`: Select the FFmpeg video encoder.
 
 ## Python API
 
@@ -90,7 +100,6 @@ The format uses the `ULF/1.0` signature and supports full-frame and delta-frame 
 
 ## Limitations
 
-- Video is grayscale.
 - Audio reconstruction is lossy.
 - Visual quality depends on the selected font and renderer.
 - Vulkan requires compatible hardware and drivers.
