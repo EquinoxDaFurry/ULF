@@ -1,0 +1,66 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "unicode-lossful-format"
+version = "0.1.0"
+description = "Encode, play, and export Unicode Lossful Format video files."
+readme = "README.md"
+requires-python = ">=3.10"
+license = "GPL-3.0-only"
+license-files = ["LICENSE"]
+authors = [{ name = "ULF contributors" }]
+keywords = ["video", "unicode", "encoder", "terminal", "ulf"]
+
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3 :: Only",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
+]
+
+dependencies = [
+    "fonttools",
+    "numpy",
+    "opencv-python",
+    "pillow",
+    "regex",
+]
+
+[project.urls]
+Homepage = "https://github.com/EquinoxDaFurry/ULF"
+Repository = "https://github.com/EquinoxDaFurry/ULF"
+Issues = "https://github.com/EquinoxDaFurry/ULF/issues"
+
+[project.optional-dependencies]
+gpu = [
+    "wgpu",
+    "rendercanvas",
+    "glfw",
+]
+audio = [
+    "sounddevice",
+]
+all = [
+    "wgpu",
+    "rendercanvas",
+    "glfw",
+    "sounddevice",
+]
+
+[project.scripts]
+ulf-encode = "ulf_encode:main"
+ulf-play = "ulf_play:main"
+ulf = "ulf.__main__:main"
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+py-modules = ["ulf_encode", "ulf_play"]
+
+[tool.setuptools.packages.find]
+where = ["src"]
